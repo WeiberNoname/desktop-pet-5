@@ -37,6 +37,7 @@ desktop-pet/
 ├── readme_commerce.txt           # Outline of marketing and sales touchpoints
 ├── planT001.txt                  # Plan blueprint on customized single-animation 3D models
 ├── planT002.txt                  # Performance plan for dedicated GPU acceleration overrides
+├── planT003.txt                  # Interaction plan for hover event lag optimizations
 └── readfolder.txt                # This directory guide (updated)
 
 ================================================================================

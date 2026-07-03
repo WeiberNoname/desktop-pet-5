@@ -37,15 +37,55 @@ function createWindow() {
   });
 }
 
+const fs = require('fs');
+
+// Helper to determine path to settings configuration file inside main process
+function getAssetsPath() {
+  const exeDir = path.dirname(process.execPath);
+  const packagedAssetsPath = path.join(exeDir, 'assets');
+  if (fs.existsSync(packagedAssetsPath)) return packagedAssetsPath;
+  return path.join(process.cwd(), 'assets');
+}
+
+function shouldOptimizeGPU() {
+  const assetsDir = getAssetsPath();
+  const settingsFile = path.join(assetsDir, 'settings');
+  const settingsTxtFile = path.join(assetsDir, 'settings.txt');
+  let filePath = null;
+  if (fs.existsSync(settingsFile)) filePath = settingsFile;
+  else if (fs.existsSync(settingsTxtFile)) filePath = settingsTxtFile;
+  
+  if (filePath && fs.existsSync(filePath)) {
+    try {
+      const data = fs.readFileSync(filePath, 'utf8');
+      const lines = data.split('\n');
+      let optimize = true; // Default to true if not specified
+      lines.forEach(line => {
+        const parts = line.split('=');
+        if (parts.length === 2 && parts[0].trim() === 'gpuOptimize') {
+          optimize = (parts[1].trim() !== 'false');
+        }
+      });
+      return optimize;
+    } catch (e) {
+      console.error('Error reading settings in main:', e);
+    }
+  }
+  return true; // Default to true if file missing
+}
+
 // Disable GPU occlusion tracking to prevent chromium from suspending rendering
 // when window overlaps with other apps
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows', 'true');
 
-// Force Electron to request the high-performance dedicated GPU (discrete graphics)
-app.commandLine.appendSwitch('force_high_performance_gpu', 'true');
+// Conditionally append GPU optimizations based on user preference config
+if (shouldOptimizeGPU()) {
+  // Force Electron to request the high-performance dedicated GPU (discrete graphics)
+  app.commandLine.appendSwitch('force_high_performance_gpu', 'true');
 
-// Bypass Chromium driver blocklists to ensure hardware acceleration is active
-app.commandLine.appendSwitch('ignore-gpu-blocklist', 'true');
+  // Bypass Chromium driver blocklists to ensure hardware acceleration is active
+  app.commandLine.appendSwitch('ignore-gpu-blocklist', 'true');
+}
 
 // Disable automatic DPI scaling to prevent window enlarging/shrinking when dragging across monitors
 app.commandLine.appendSwitch('force-device-scale-factor', '1');
