@@ -6,7 +6,7 @@ const fs = window.require('fs');
 const path = window.require('path');
 const { pathToFileURL } = window.require('url');
 
-let scene, camera, renderer, characterGroup, innerModelGroup;
+let scene, camera, renderer, characterGroup, innerModelGroup, collisionProxy;
 let mixer;
 let customModelLoaded = false;
 
@@ -21,8 +21,24 @@ let currentSettings = {
   spinZ: false,
   speedX: 1.0,
   speedY: 1.0,
-  speedZ: 1.0
+  speedZ: 1.0,
+  gpuOptimize: true,
+  mouseOptimize: true,
+  settingsLeft: false
 };
+
+// Helper function to update gear position dynamically
+function updateGearPosition() {
+  const gearBtn = document.getElementById('settings-btn');
+  if (!gearBtn) return;
+  if (currentSettings.settingsLeft) {
+    gearBtn.style.left = '10px';
+    gearBtn.style.right = 'auto';
+  } else {
+    gearBtn.style.right = '10px';
+    gearBtn.style.left = 'auto';
+  }
+}
 let hasSettingsFile = false;
 let isSettingsOpen = false;
 let isMouseOverCharacter = false;
@@ -86,6 +102,7 @@ function init() {
   // 6.5. Setup Settings UI panel listeners if enabled
   if (hasSettingsFile) {
     setupSettingsUI();
+    updateGearPosition();
   }
 
   // 7. Start Animation Loop
@@ -239,6 +256,13 @@ function createMascot() {
   rightFoot.position.set(0.4, -0.9, 0.2);
   innerModelGroup.add(rightFoot);
 
+  // Create an invisible simplified box collision proxy matching mascot scale
+  const proxyGeom = new THREE.BoxGeometry(1.6, 2.0, 1.6);
+  const proxyMat = new THREE.MeshBasicMaterial({ visible: false });
+  collisionProxy = new THREE.Mesh(proxyGeom, proxyMat);
+  collisionProxy.position.set(0, 0, 0);
+  characterGroup.add(collisionProxy);
+
   // Tilt character slightly forward towards camera
   characterGroup.rotation.x = 0.08;
 
@@ -248,6 +272,7 @@ function createMascot() {
 function setupInteraction() {
   const raycaster = new THREE.Raycaster();
   const mouse = new THREE.Vector2();
+  let lastRaycastTime = 0;
 
   // Track mouse movements to update window ignore-mouse states
   window.addEventListener('mousemove', (event) => {
@@ -264,12 +289,26 @@ function setupInteraction() {
       return;
     }
 
+    // Throttle hover raycast updates under Seamless Performance Mode
+    if (currentSettings.mouseOptimize) {
+      const now = Date.now();
+      if (now - lastRaycastTime < 16) return;
+      lastRaycastTime = now;
+    }
+
     // Convert mouse client coordinates to Normalized Device Coordinates (-1 to +1)
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
     raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObjects(characterGroup.children, true);
+    
+    // Raycast against simplified box proxy (Seamless Mode) or recursively through full meshes (Precise Mode)
+    let intersects = [];
+    if (currentSettings.mouseOptimize && collisionProxy) {
+      intersects = raycaster.intersectObject(collisionProxy);
+    } else {
+      intersects = raycaster.intersectObjects(characterGroup.children, true);
+    }
 
     if (intersects.length > 0 || isSettingsOpen) {
       if (!isMouseOverCharacter) {
@@ -427,6 +466,13 @@ function loadCustomModel(filePath) {
       characterGroup.add(innerGroup);
       innerModelGroup = innerGroup;
 
+      // Create an invisible simplified box collision proxy matching custom model size bounds
+      const proxyGeom = new THREE.BoxGeometry(size.x, size.y, size.z);
+      const proxyMat = new THREE.MeshBasicMaterial({ visible: false });
+      collisionProxy = new THREE.Mesh(proxyGeom, proxyMat);
+      collisionProxy.position.set(0, 0, 0);
+      characterGroup.add(collisionProxy);
+
       const padding = 1.35;
       const pixelsPerUnit = 175; // Scale mapping (175 screen pixels per Three.js unit)
 
@@ -467,7 +513,7 @@ function loadCustomModel(filePath) {
         const zPos = visibleHeight / (2 * Math.tan((camera.fov * Math.PI) / 360));
         camera.position.set(0, 0, zPos + (size.z / 2));
 
-        // Trigger IPC resize command to adjust the Electron frame
+        // Resize Electron window container
         ipcRenderer.send('resize-window', { width: winWidth, height: winHeight });
       }
 
@@ -519,7 +565,10 @@ spinY=false
 spinZ=false
 speedX=1.0
 speedY=1.0
-speedZ=1.0`;
+speedZ=1.0
+gpuOptimize=true
+mouseOptimize=true
+settingsLeft=false`;
       fs.writeFileSync(filePath, defaultContent, 'utf8');
       console.log('Created default settings file at:', filePath);
     } catch (e) {
@@ -546,6 +595,9 @@ speedZ=1.0`;
           if (key === 'speedX') currentSettings.speedX = parseFloat(val) || 1.0;
           if (key === 'speedY') currentSettings.speedY = parseFloat(val) || 1.0;
           if (key === 'speedZ') currentSettings.speedZ = parseFloat(val) || 1.0;
+          if (key === 'gpuOptimize') currentSettings.gpuOptimize = (val !== 'false');
+          if (key === 'mouseOptimize') currentSettings.mouseOptimize = (val !== 'false');
+          if (key === 'settingsLeft') currentSettings.settingsLeft = (val === 'true');
         }
       });
       return true;
@@ -571,7 +623,10 @@ spinY=${currentSettings.spinY}
 spinZ=${currentSettings.spinZ}
 speedX=${currentSettings.speedX}
 speedY=${currentSettings.speedY}
-speedZ=${currentSettings.speedZ}`;
+speedZ=${currentSettings.speedZ}
+gpuOptimize=${currentSettings.gpuOptimize}
+mouseOptimize=${currentSettings.mouseOptimize}
+settingsLeft=${currentSettings.settingsLeft}`;
 
   try {
     fs.writeFileSync(filePath, content, 'utf8');
@@ -596,6 +651,10 @@ function setupSettingsUI() {
   const speedXSlider = document.getElementById('speed-x');
   const speedYSlider = document.getElementById('speed-y');
   const speedZSlider = document.getElementById('speed-z');
+  
+  const gpuOptimizeCheck = document.getElementById('gpu-optimize');
+  const mouseOptimizeCheck = document.getElementById('mouse-optimize');
+  const settingsLeftCheck = document.getElementById('settings-left');
   
   const valWidth = document.getElementById('val-width');
   const valHeight = document.getElementById('val-height');
@@ -626,6 +685,10 @@ function setupSettingsUI() {
     speedXSlider.value = currentSettings.speedX;
     speedYSlider.value = currentSettings.speedY;
     speedZSlider.value = currentSettings.speedZ;
+    
+    gpuOptimizeCheck.checked = currentSettings.gpuOptimize;
+    mouseOptimizeCheck.checked = currentSettings.mouseOptimize;
+    settingsLeftCheck.checked = currentSettings.settingsLeft;
 
     valWidth.innerText = currentSettings.width;
     valHeight.innerText = currentSettings.height;
@@ -658,12 +721,17 @@ function setupSettingsUI() {
     valSpeedZ.innerText = parseFloat(speedZSlider.value).toFixed(1);
   });
 
-  // Show panel controls
+  // Toggle panel controls (expand or close) to prevent locked window loops
   gearBtn.addEventListener('click', () => {
-    isSettingsOpen = true;
-    syncSlidersUI(); // Ensure sliders match actual current saved settings
-    panel.classList.remove('hidden');
-    ipcRenderer.send('set-ignore-mouse', false);
+    if (isSettingsOpen) {
+      syncSlidersUI();
+      closeSettings();
+    } else {
+      isSettingsOpen = true;
+      syncSlidersUI(); // Ensure sliders match actual current saved settings
+      panel.classList.remove('hidden');
+      ipcRenderer.send('set-ignore-mouse', false);
+    }
   });
 
   const closeSettings = () => {
@@ -693,9 +761,16 @@ function setupSettingsUI() {
     currentSettings.speedX = parseFloat(speedXSlider.value);
     currentSettings.speedY = parseFloat(speedYSlider.value);
     currentSettings.speedZ = parseFloat(speedZSlider.value);
+    
+    currentSettings.gpuOptimize = gpuOptimizeCheck.checked;
+    currentSettings.mouseOptimize = mouseOptimizeCheck.checked;
+    currentSettings.settingsLeft = settingsLeftCheck.checked;
 
     // 2. Save settings to local configuration file
     saveSettingsFile();
+
+    // Apply position shift to the gear button
+    updateGearPosition();
 
     // 3. Apply changes to WebGL viewport size and camera aspect
     camera.aspect = currentSettings.width / currentSettings.height;
