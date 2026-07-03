@@ -1,3 +1,6 @@
+<img width="400" height="238" alt="Recording 2026-07-03 211945" src="https://github.com/user-attachments/assets/0efe8d3f-3b8c-42d7-bfed-efe6af778068" />
+
+
 # 3D Transparent Desktop Mascot Pet 🐰
 
 A floating, borderless, fully transparent (RGBA 0,0,0,0) 3D interactive companion pet application for Windows, powered by **Electron** and **Three.js (WebGL)**.
